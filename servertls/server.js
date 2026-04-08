@@ -9,5 +9,5 @@ app.get('/', (req, res) => {
 
 // Nginx enviará el tráfico aquí
 app.listen(3000, () => {
-    console.log('Servidor interno corriendo en el puerto 3000');
+    console.log('Servidora interno corriendo en el puerto 3000');
 });
