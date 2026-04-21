@@ -54,7 +54,7 @@ app.get('/api/admin-only', authenticateToken, (req, res) => {
 // API
 app.get('/api/status', (req, res) => {
     res.json({
-        mensaje: "MEnsaje probando tls y nginx",
+        mensaje: "Servidor operativo - Validación TLS/Nginx exitosa",
         protocolo_interno: "HTTP",
         protocolo_externo: "HTTPS (TLS 1.3)"
     });
