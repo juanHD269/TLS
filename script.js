@@ -1,9 +1,34 @@
 let miToken = "";
+let current2FASecret = "";
 const displayResultado = document.getElementById('resultado');
 const statusBadge = document.getElementById('status-badge');
 const authSection = document.getElementById('auth-section');
 const actionsSection = document.getElementById('actions-section');
+const setup2FASection = document.getElementById('setup-2fa-section');
 const userDisplay = document.getElementById('user-display');
+const btnSubmit = document.getElementById('btnSubmit');
+const qrcodeContainer = document.getElementById('qrcode-container');
+
+// Gestión de Tabs
+const tabLogin = document.getElementById('tab-login');
+const tabRegister = document.getElementById('tab-register');
+let isLoginMode = true;
+
+tabLogin.addEventListener('click', () => {
+    isLoginMode = true;
+    tabLogin.classList.add('active');
+    tabRegister.classList.remove('active');
+    btnSubmit.querySelector('span').innerText = "Iniciar Sesión";
+    btnSubmit.querySelector('i').className = "fas fa-sign-in-alt";
+});
+
+tabRegister.addEventListener('click', () => {
+    isLoginMode = false;
+    tabRegister.classList.add('active');
+    tabLogin.classList.remove('active');
+    btnSubmit.querySelector('span').innerText = "Crear Cuenta";
+    btnSubmit.querySelector('i').className = "fas fa-user-plus";
+});
 
 // Utilidad para actualizar el terminal
 function updateTerminal(message, type = 'info') {
@@ -21,8 +46,8 @@ function updateTerminal(message, type = 'info') {
     }
 }
 
-// Función para Login
-async function login() {
+// Función para Login / Registro
+async function handleAuth() {
     const userInp = document.getElementById('username').value;
     const passInp = document.getElementById('password').value;
 
@@ -31,10 +56,11 @@ async function login() {
         return;
     }
 
-    updateTerminal("Autenticando...");
+    const endpoint = isLoginMode ? '/api/login' : '/api/register';
+    updateTerminal(isLoginMode ? "Autenticando..." : "Registrando en la bóveda...");
 
     try {
-        const res = await fetch('/api/login', {
+        const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: userInp, password: passInp })
@@ -42,20 +68,76 @@ async function login() {
         
         const data = await res.json();
         
-        if (data.token) {
-            miToken = data.token;
-            userDisplay.innerHTML = `Bienvenido, <strong>${userInp}</strong>`;
-            
-            // UI Transition
-            authSection.classList.add('hidden');
-            actionsSection.classList.remove('hidden');
-            
-            updateTerminal("✅ Login exitoso. Token JWT generado correctamente.", "success");
+        if (res.ok) {
+            if (isLoginMode) {
+                miToken = data.token;
+                userDisplay.innerHTML = `Sesión: <strong>${userInp}</strong> (${data.role})`;
+                
+                if (!data.has2FA) {
+                    updateTerminal("⚠️ Seguridad incompleta. Configure 2FA.", "info");
+                    setup2FA();
+                } else {
+                    authSection.classList.add('hidden');
+                    actionsSection.classList.remove('hidden');
+                    updateTerminal("✅ Acceso concedido. Protocolo TLS activo.", "success");
+                }
+            } else {
+                updateTerminal(data.mensaje, "success");
+                // Cambiar a login después de registrar
+                tabLogin.click();
+            }
         } else {
-            updateTerminal(`❌ Error: ${data.error || "Credenciales inválidas"}`, "error");
+            updateTerminal(`❌ Error: ${data.error}`, "error");
         }
     } catch (error) {
-        updateTerminal("⚠️ Error crítico: No se pudo conectar con el backend.", "error");
+        updateTerminal("⚠️ Error crítico: No se pudo conectar con el sistema.", "error");
+    }
+}
+
+// Función para iniciar configuración 2FA
+async function setup2FA() {
+    try {
+        const res = await fetch('/api/2fa/setup', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${miToken}` }
+        });
+        const data = await res.json();
+        
+        current2FASecret = data.secret;
+        qrcodeContainer.innerHTML = `<img src="${data.qrCode}" alt="QR 2FA">`;
+        
+        authSection.classList.add('hidden');
+        setup2FASection.classList.remove('hidden');
+    } catch (e) {
+        updateTerminal("Error al generar configuración 2FA", "error");
+    }
+}
+
+// Verificar 2FA
+async function verify2FA() {
+    const token = document.getElementById('2fa-token').value;
+    if (!token) return updateTerminal("Ingrese el código de 6 dígitos", "error");
+
+    try {
+        const res = await fetch('/api/2fa/verify', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${miToken}`
+            },
+            body: JSON.stringify({ token, secret: current2FASecret })
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+            setup2FASection.classList.add('hidden');
+            actionsSection.classList.remove('hidden');
+            updateTerminal("✅ 2FA verificado. Seguridad completa.", "success");
+        } else {
+            updateTerminal(data.mensaje, "error");
+        }
+    } catch (e) {
+        updateTerminal("Error en verificación 2FA", "error");
     }
 }
 
@@ -85,18 +167,22 @@ function logout() {
     miToken = "";
     authSection.classList.remove('hidden');
     actionsSection.classList.add('hidden');
-    updateTerminal("Sesión cerrada. Inicie sesión de nuevo.", "info");
+    setup2FASection.classList.add('hidden');
+    updateTerminal("Sesión finalizada. Inicie sesión de nuevo.", "info");
     document.getElementById('password').value = "";
+    document.getElementById('2fa-token').value = "";
 }
 
 // Eventos
-document.getElementById('btnLogin').addEventListener('click', login);
+btnSubmit.addEventListener('click', handleAuth);
+document.getElementById('btnVerify2FA').addEventListener('click', verify2FA);
 document.getElementById('btnSecret').addEventListener('click', verSecreto);
 document.getElementById('btnLogout').addEventListener('click', logout);
 
-// Permitir Login con Enter
+// Enter para enviar
 document.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter' && !authSection.classList.contains('hidden')) {
-        login();
+    if (e.key === 'Enter') {
+        if (!authSection.classList.contains('hidden')) handleAuth();
+        else if (!setup2FASection.classList.contains('hidden')) verify2FA();
     }
 });
